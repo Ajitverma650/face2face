@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:5000');
 
-export const useWebRTC = (roomId) => {
+export const useWebRTC = (currentUserId) => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const peerConnection = useRef(null);
@@ -13,6 +13,7 @@ export const useWebRTC = (roomId) => {
   const [isCalling, setIsCalling] = useState(false);
   const [isRinging, setIsRinging] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
+  const [activeRoomId, setActiveRoomId] = useState(null);
 
   const servers = {
     iceServers: [
@@ -23,10 +24,13 @@ export const useWebRTC = (roomId) => {
 
   /* -------------------- SOCKET LISTENERS -------------------- */
   useEffect(() => {
-    socket.emit('join-room', roomId);
+    if (!currentUserId) return;
 
-    socket.on('incoming-call', ({ from }) => {
+    socket.emit('identify', currentUserId);
+
+    socket.on('incoming-call', ({ from, roomId }) => {
       setIncomingCall(from);
+      setActiveRoomId(roomId);
       setIsRinging(true);
     });
 
@@ -35,35 +39,35 @@ export const useWebRTC = (roomId) => {
       setIsJoined(true);
     });
 
-    socket.on('call-rejected', () => {
-      cleanup();
-    });
-
-    socket.on('call-ended', () => {
-      cleanup();
-    });
+    socket.on('call-rejected', () => cleanup());
+    socket.on('call-ended', () => cleanup());
 
     socket.on('offer', async ({ sdp }) => {
       if (!peerConnection.current) return;
-      try {
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
-        const answer = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answer);
-        socket.emit('answer', { roomId, sdp: answer });
-      } catch (e) { console.error(e); }
+
+      await peerConnection.current.setRemoteDescription(
+        new RTCSessionDescription(sdp)
+      );
+
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+
+      socket.emit('answer', { roomId: activeRoomId, sdp: answer });
     });
 
     socket.on('answer', async ({ sdp }) => {
-      if (peerConnection.current && peerConnection.current.signalingState !== "stable") {
-        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(sdp));
+      if (peerConnection.current?.signalingState !== 'stable') {
+        await peerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(sdp)
+        );
       }
     });
 
     socket.on('ice-candidate', async ({ candidate }) => {
       if (candidate && peerConnection.current) {
-        try {
-          await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) { console.error(e); }
+        await peerConnection.current.addIceCandidate(
+          new RTCIceCandidate(candidate)
+        );
       }
     });
 
@@ -76,7 +80,7 @@ export const useWebRTC = (roomId) => {
       socket.off('answer');
       socket.off('ice-candidate');
     };
-  }, [roomId]);
+  }, [currentUserId, activeRoomId]);
 
   /* -------------------- INIT WEBRTC -------------------- */
   useEffect(() => {
@@ -84,66 +88,77 @@ export const useWebRTC = (roomId) => {
 
     const init = async () => {
       try {
-        // Only get media if we don't already have it
         if (!localStream.current) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+
           localStream.current = stream;
-          if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
         }
 
-        // Always create a fresh PeerConnection for a new call
         if (!peerConnection.current) {
           peerConnection.current = new RTCPeerConnection(servers);
 
-          localStream.current.getTracks().forEach(track => {
-            peerConnection.current.addTrack(track, localStream.current);
-          });
+          localStream.current.getTracks().forEach(track =>
+            peerConnection.current.addTrack(track, localStream.current)
+          );
 
           peerConnection.current.ontrack = (e) => {
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = e.streams[0];
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = e.streams[0];
+            }
           };
 
           peerConnection.current.onicecandidate = (e) => {
             if (e.candidate) {
-              socket.emit('ice-candidate', { roomId, candidate: e.candidate });
+              socket.emit('ice-candidate', {
+                roomId: activeRoomId,
+                candidate: e.candidate,
+              });
             }
           };
         }
 
-        // signaling: the one who accepts the call sends the offer
         if (isJoined && !isCalling) {
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
-          socket.emit('offer', { roomId, sdp: offer });
+          socket.emit('offer', { roomId: activeRoomId, sdp: offer });
         }
       } catch (err) {
-        console.error("Media Error:", err);
+        console.error('Media Error:', err);
       }
     };
 
     init();
-  }, [isJoined, isCalling, roomId]);
+  }, [isJoined, isCalling, activeRoomId]);
 
   /* -------------------- ACTIONS -------------------- */
-  const callUser = () => {
+  const startPrivateCall = (targetUserId) => {
+    const roomId = `room-${currentUserId}-${targetUserId}-${Date.now()}`;
+    setActiveRoomId(roomId);
     setIsCalling(true);
-    socket.emit('call-user', { roomId });
+    socket.emit('join-room', roomId);
+    socket.emit('call-user', { roomId, targetUserId });
   };
 
   const acceptCall = () => {
     setIsRinging(false);
-    setIncomingCall(null);
-    socket.emit('accept-call', { roomId });
+    socket.emit('join-room', activeRoomId);
+    socket.emit('accept-call', { roomId: activeRoomId });
     setIsJoined(true);
   };
 
   const rejectCall = () => {
-    socket.emit('reject-call', { roomId });
+    socket.emit('reject-call', { roomId: activeRoomId });
     cleanup();
   };
 
   const endCall = () => {
-    socket.emit('end-call', { roomId });
+    socket.emit('end-call', { roomId: activeRoomId });
     cleanup();
   };
 
@@ -152,6 +167,7 @@ export const useWebRTC = (roomId) => {
     setIsCalling(false);
     setIsRinging(false);
     setIncomingCall(null);
+    setActiveRoomId(null);
 
     if (localStream.current) {
       localStream.current.getTracks().forEach(t => t.stop());
@@ -162,10 +178,18 @@ export const useWebRTC = (roomId) => {
       peerConnection.current.close();
       peerConnection.current = null;
     }
-
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
   };
 
-  return { localVideoRef, remoteVideoRef, callUser, acceptCall, rejectCall, endCall, isJoined, isCalling, isRinging, incomingCall };
+  return {
+    localVideoRef,
+    remoteVideoRef,
+    isJoined,
+    isCalling,
+    isRinging,
+    incomingCall,
+    startPrivateCall,
+    acceptCall,
+    rejectCall,
+    endCall,
+  };
 };
