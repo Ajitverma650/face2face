@@ -3,7 +3,7 @@ import { Users, Circle } from 'lucide-react';
 
 const UserList = ({ users, onCall, disabled }) => (
   <div className="lg:col-span-3 space-y-6">
-    <div className="bg-zinc-900/50 border border-zinc-800 rounded-3xl p-6 backdrop-blur-sm h-[600px] flex flex-col">
+    <div className="bg-zinc-900/50 border border-zinc-800 rounded-3xl p-6 backdrop-blur-sm h-150 flex flex-col">
       <div className="flex items-center gap-2 mb-6 px-2 text-zinc-500">
         <Users size={18} />
         <h3 className="text-xs font-black uppercase tracking-widest">Online Contacts</h3>

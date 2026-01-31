@@ -30,14 +30,7 @@ const Controls = ({ states, actions }) => {
       </div>
 
       <div className="space-y-4">
-        {!isJoined && !isCalling && !isRinging && (
-          <button
-            onClick={callUser}
-            className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
-          >
-            <Phone size={20} /> Establish Call
-          </button>
-        )}
+       
 
         {isCalling && (
           <button

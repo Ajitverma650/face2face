@@ -12,14 +12,12 @@ const app = express();
 app.use(cors()); 
 app.use(express.json()); // Essential for parsing login/signup data
 
-// 1. Database Connection (MongoDB)
-// Ensure MONGO_URI is defined in your .env file
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB Connected Successfully'))
   .catch(err => console.error('MongoDB Connection Error:', err));
 
-// 2. API Routes for Iteration 2
-// These routes handle user accounts and call history persistence
+
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/calls', require('./routes/callRoutes'));
 
