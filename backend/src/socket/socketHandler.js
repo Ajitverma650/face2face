@@ -19,10 +19,10 @@ const socketHandler = (io) => {
     });
 
     // 2. Secure Join Room
-    socket.on('join-room', (roomId) => {
-      socket.join(roomId);
-      socket.to(roomId).emit('user-connected', socket.id);
-    });
+        socket.on('join-room', (roomId) => {
+        socket.join(roomId);
+      });
+
 
     // 3. Private Signaling: Only signal to specific socketId
     socket.on('call-user', async ({ roomId, targetUserId }) => {
