@@ -33,7 +33,7 @@ const Dashboard = () => {
     if (user) {
       const fetchUsers = async () => {
         try {
-          const res = await axios.get('http://localhost:5000/api/users/online');
+          const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/online`);
           setOnlineUsers(res.data.filter(u => u._id !== user.id));
         } catch (err) {
           console.error("Error fetching online users:", err);

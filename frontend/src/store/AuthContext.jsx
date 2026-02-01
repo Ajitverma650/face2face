@@ -20,7 +20,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    const res = await axios.post('http://localhost:5000/api/users/login', { email, password });
+    const res = await axios.post(`${import.meta.env.VITE_API_URL}/api/users/login`, { email, password });
     localStorage.setItem('token', res.data.token);
     localStorage.setItem('user', JSON.stringify(res.data.user));
     axios.defaults.headers.common['Authorization'] = res.data.token;

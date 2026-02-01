@@ -14,7 +14,7 @@ const Signup = () => {
     e.preventDefault();
     try {
       // 1. Register user in backend
-      await axios.post('http://localhost:5000/api/users/register', formData);
+      await axios.post(`${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/api/users/register`, formData);
       // 2. Automatically log them in after signup
       await login(formData.email, formData.password);
       navigate('/');
