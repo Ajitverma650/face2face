@@ -16,4 +16,5 @@ router.post('/login', userController.login);
 // @access  Private
 router.get('/online', auth, userController.getOnlineUsers);
 
+
 module.exports = router;

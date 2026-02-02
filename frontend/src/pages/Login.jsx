@@ -28,7 +28,7 @@ const Login = () => {
             <LogIn className="text-indigo-500" size={32} />
           </div>
           <h2 className="text-2xl font-bold text-zinc-100">Welcome Back</h2>
-          <p className="text-zinc-500 text-sm mt-2">Sign in to your secure terminal</p>
+          <p className="text-zinc-500 text-sm mt-2">Sign in </p>
         </div>
 
         {error && <div className="mb-6 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs rounded-xl text-center">{error}</div>}

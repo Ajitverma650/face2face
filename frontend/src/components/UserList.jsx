@@ -22,17 +22,27 @@ const UserList = ({ users, onCall, disabled }) => (
                 </div>
                 <span className="text-sm font-medium text-zinc-300">{u.username}</span>
               </div>
-              <button 
+              <button
                 onClick={() => onCall(u._id)}
                 disabled={disabled}
-                className="opacity-0 group-hover:opacity-100 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white text-[10px] font-bold rounded-lg transition-all disabled:hidden"
+                className="px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white text-[10px] font-bold rounded-lg transition-all disabled:hidden"
               >
                 CALL
               </button>
             </div>
           ))
         ) : (
-          <p className="text-zinc-600 text-xs text-center mt-10 italic">No other users online</p>
+          <>
+            <p className="text-zinc-600 text-xs text-center mt-10 italic">No other users online  </p>
+            <h1 className="text-zinc-600 text-xs text-center mt-2 italic">refresh page after few second if call is not connecting</h1>
+            <br></br>
+            <br></br>
+
+            <p className="text-sm font-semibold text-indigo-600">
+               Accept call From Control Panel
+            </p>
+
+          </>
         )}
       </div>
     </div>
