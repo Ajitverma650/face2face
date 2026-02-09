@@ -41,7 +41,7 @@ const io = new Server(server, {
 
 socketHandler(io);
 
-// Global error handler middleware (Bug #13 fix)
+// Global error handler middleware 
 app.use((err, req, res, next) => {
   console.error('Unhandled Error:', err.stack);
   res.status(err.status || 500).json({ msg: 'Internal server error' });

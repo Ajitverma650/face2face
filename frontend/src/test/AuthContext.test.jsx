@@ -1,7 +1,7 @@
 /**
  * Tests for AuthContext.jsx
- * Bug #2: Missing API_URL fallback
- * Bug #17: Logout accepts callback
+ *  Missing API_URL fallback
+ *  Logout accepts callback
  */
 import { render, screen, act } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';

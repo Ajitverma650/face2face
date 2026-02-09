@@ -7,6 +7,8 @@ import VideoGrid from '../components/VideoGrid';
 import Controls from '../components/Controls';
 import UserList from '../components/UserList';
 import { Monitor } from 'lucide-react';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -39,6 +41,7 @@ const Dashboard = () => {
           setOnlineUsers(res.data.filter(u => u._id !== user.id));
         } catch (err) {
           console.error("Error fetching online users:", err);
+          toast.error(err.response?.data?.message || "Failed to fetch online users");
         }
       };
 
@@ -48,8 +51,27 @@ const Dashboard = () => {
     }
   }, [user]);
 
+  // Show media error as toast
+  useEffect(() => {
+    if (mediaError) {
+      toast.error(mediaError);
+    }
+  }, [mediaError]);
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans antialiased">
+      <ToastContainer
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="dark"
+      />
       <Navbar onLogout={() => socket?.disconnect()} />
 
       <main className="max-w-7xl mx-auto px-6 py-10">

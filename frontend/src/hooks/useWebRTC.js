@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
+import { toast } from 'react-toastify';
 
-// Bug #9 fix: Create socket with autoConnect: false — connect only after auth
+//  Create socket with autoConnect: false — connect only after auth
 const socket = io(
   import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
   { autoConnect: false }
@@ -18,10 +19,10 @@ export const useWebRTC = (currentUserId) => {
   const peerConnection = useRef(null);
   const localStream = useRef(null);
 
-  // Bug #5 fix: Use ref for activeRoomId to avoid stale closures in socket listeners
+  // Use ref for activeRoomId to avoid stale closures in socket listeners
   const activeRoomIdRef = useRef(null);
 
-  // Bug #3 fix: Track caller vs receiver role
+  // Track caller vs receiver role
   const roleRef = useRef(null); // 'caller' | 'receiver'
 
   /* =========================================================
@@ -33,7 +34,7 @@ export const useWebRTC = (currentUserId) => {
   const [isRinging, setIsRinging] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeRoomId, setActiveRoomId] = useState(null);
-  const [mediaError, setMediaError] = useState(null); // Bug #14 fix
+  const [mediaError, setMediaError] = useState(null); // 
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -87,7 +88,7 @@ export const useWebRTC = (currentUserId) => {
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Bug #9 fix: Connect socket only when user is authenticated
+    //  Connect socket only when user is authenticated
     if (!socket.connected) {
       socket.connect();
     }
@@ -108,10 +109,17 @@ export const useWebRTC = (currentUserId) => {
     });
 
     /* ---------- Call rejected / ended / errors ---------- */
-    socket.on('call-rejected', () => cleanup());
-    socket.on('call-ended', () => cleanup());
+    socket.on('call-rejected', () => {
+      toast.info('Call was rejected');
+      cleanup();
+    });
+    socket.on('call-ended', () => {
+      toast.info('Call ended');
+      cleanup();
+    });
     socket.on('call-error', ({ message }) => {
       console.error('Call Error:', message);
+      toast.error(message || 'Call error occurred');
       cleanup();
     });
 
@@ -127,20 +135,21 @@ export const useWebRTC = (currentUserId) => {
         const answer = await peerConnection.current.createAnswer();
         await peerConnection.current.setLocalDescription(answer);
 
-        // Bug #5 fix: Use ref instead of stale closure
+        // Use ref instead of stale closure
         socket.emit('answer', { 
           roomId: activeRoomIdRef.current, 
           sdp: answer 
         });
       } catch (err) {
         console.error('Offer handling error:', err);
+        toast.error('Failed to process call offer');
       }
     });
 
     /* ---------- WebRTC ANSWER ---------- */
     socket.on('answer', async ({ sdp }) => {
       try {
-        // Bug #11 fix: Only accept answer in 'have-local-offer' state
+        //  Only accept answer in 'have-local-offer' state
         if (peerConnection.current?.signalingState === 'have-local-offer') {
           await peerConnection.current.setRemoteDescription(
             new RTCSessionDescription(sdp)
@@ -148,6 +157,7 @@ export const useWebRTC = (currentUserId) => {
         }
       } catch (err) {
         console.error('Answer handling error:', err);
+        toast.error('Failed to process call answer');
       }
     });
 
@@ -161,6 +171,7 @@ export const useWebRTC = (currentUserId) => {
         }
       } catch (err) {
         console.error('ICE candidate error:', err);
+        toast.error('Network connection error');
       }
     });
 
@@ -216,14 +227,14 @@ export const useWebRTC = (currentUserId) => {
           peerConnection.current.onicecandidate = (e) => {
             if (e.candidate) {
               socket.emit('ice-candidate', {
-                roomId: activeRoomIdRef.current, // Bug #5 fix: use ref
+                roomId: activeRoomIdRef.current, 
                 candidate: e.candidate,
               });
             }
           };
         }
 
-        /* ---------- Bug #3 fix: Only receiver creates the OFFER ---------- */
+        /* ---------- Only receiver creates the OFFER ---------- */
         if (isJoined && roleRef.current === 'receiver') {
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
@@ -235,7 +246,7 @@ export const useWebRTC = (currentUserId) => {
         }
       } catch (err) {
         console.error('Media Error:', err);
-        // Bug #14 fix: Surface media errors to UI
+        // Surface media errors to UI
         if (err.name === 'NotAllowedError') {
           setMediaError('Camera/microphone permission denied. Please allow access and try again.');
         } else if (err.name === 'NotFoundError') {
@@ -258,7 +269,7 @@ export const useWebRTC = (currentUserId) => {
 
     setActiveRoomId(roomId);
     setIsCalling(true);
-    roleRef.current = 'caller'; // Bug #3 fix
+    roleRef.current = 'caller';
 
     socket.emit('join-room', roomId);
     socket.emit('call-user', { roomId, targetUserId });
@@ -266,7 +277,7 @@ export const useWebRTC = (currentUserId) => {
 
   const acceptCall = () => {
     setIsRinging(false);
-    roleRef.current = 'receiver'; // Bug #3 fix
+    roleRef.current = 'receiver'; 
 
     socket.emit('join-room', activeRoomIdRef.current);
     socket.emit('accept-call', { roomId: activeRoomIdRef.current });

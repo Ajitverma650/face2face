@@ -1,6 +1,6 @@
 /**
  * Tests for Controls.jsx
- * Bug #12: Removed dead `callUser` destructure
+ *  Removed dead `callUser` destructure
  */
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';

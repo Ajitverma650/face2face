@@ -2,6 +2,7 @@ const User = require('../models/User');
 
 const CALL_TIMEOUT_MS = 30000; // 30 seconds
 const pendingCalls = new Map();  // roomId → timeoutId
+const callReceivers = new Map(); // roomId → receiver socketId
 
 
 const socketHandler = (io) => {
@@ -24,7 +25,7 @@ const socketHandler = (io) => {
         }, { new: true });
 
         socket.userId = userId; 
-        socket.username = user?.username || 'Anonymous'; // Bug #6 fix
+        socket.username = user?.username || 'Anonymous'; 
 
         console.log(`User ${userId} (${socket.username}) is now online with socket ${socket.id}`);
       } catch (err) {
@@ -54,10 +55,13 @@ const socketHandler = (io) => {
           return socket.emit('call-error', { message: 'User is in another call' });
         }
 
-        // Bug #4 fix: Mark caller as busy when initiating call
+        //Mark caller as busy when initiating call
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'busy' });
         }
+
+        // Track receiver for cleanup when caller cancels
+        callReceivers.set(roomId, target.socketId);
 
         socket.to(target.socketId).emit('incoming-call', { 
           from: socket.id,
@@ -69,6 +73,7 @@ const socketHandler = (io) => {
         const timeoutId = setTimeout(async () => {
           try {
             pendingCalls.delete(roomId);
+            callReceivers.delete(roomId);
             if (socket.userId) {
               await User.findByIdAndUpdate(socket.userId, { status: 'online' });
             }
@@ -86,7 +91,7 @@ const socketHandler = (io) => {
     });
 
     /* =========================================================
-       4. ACCEPT CALL — Bug #7 fix: wrap in try-catch
+       4. ACCEPT CALL — 
     */
     socket.on('accept-call', async ({ roomId }) => {
       try {
@@ -95,6 +100,9 @@ const socketHandler = (io) => {
           clearTimeout(pendingCalls.get(roomId));
           pendingCalls.delete(roomId);
         }
+
+        // Clear receiver tracking (no longer needed once accepted)
+        callReceivers.delete(roomId);
 
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'busy' });
@@ -116,6 +124,9 @@ const socketHandler = (io) => {
           clearTimeout(pendingCalls.get(roomId));
           pendingCalls.delete(roomId);
         }
+
+        // Clear receiver tracking
+        callReceivers.delete(roomId);
 
         // Revert rejector's status to online
         if (socket.userId) {
@@ -148,6 +159,10 @@ const socketHandler = (io) => {
           pendingCalls.delete(roomId);
         }
 
+        // Get receiver socket ID for direct notification
+        const receiverSocketId = callReceivers.get(roomId);
+        callReceivers.delete(roomId);
+
         // Revert ender's status to online
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'online' });
@@ -161,6 +176,11 @@ const socketHandler = (io) => {
           }
         }
 
+        // Notify receiver directly (if they haven't joined room yet)
+        if (receiverSocketId) {
+          io.to(receiverSocketId).emit('call-ended', { from: socket.id });
+        }
+        // Also emit to room (for active calls)
         socket.to(roomId).emit('call-ended', { from: socket.id });
         socket.leave(roomId);
       } catch (err) {
@@ -190,6 +210,20 @@ const socketHandler = (io) => {
     */
     socket.on('disconnect', async () => {
       try {
+        // Clean up pending calls where this socket was the caller
+        for (const [roomId, receiverSocketId] of callReceivers.entries()) {
+          // Check if disconnected socket was part of this call setup
+          const callerRoom = Array.from(socket.rooms).find(r => r === roomId);
+          if (callerRoom) {
+            io.to(receiverSocketId).emit('call-ended', { from: socket.id });
+            callReceivers.delete(roomId);
+            if (pendingCalls.has(roomId)) {
+              clearTimeout(pendingCalls.get(roomId));
+              pendingCalls.delete(roomId);
+            }
+          }
+        }
+
         // Notify all rooms this socket was in (skip its own socket.id room)
         for (const roomId of socket.rooms) {
           if (roomId === socket.id) continue;

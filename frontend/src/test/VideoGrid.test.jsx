@@ -1,6 +1,6 @@
 /**
  * Tests for VideoGrid.jsx
- * Bug #16: Fixed col-span-8 → col-span-6
+ * Fixed col-span-8 → col-span-6
  */
 import { render } from '@testing-library/react';
 import { describe, test, expect, vi } from 'vitest';
