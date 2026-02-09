@@ -71,6 +71,14 @@ export const useWebRTC = (currentUserId) => {
       peerConnection.current.close();
       peerConnection.current = null;
     }
+
+    // Clear video elements so last frame doesn't stay frozen
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
   }, []);
 
   /* =========================================================
