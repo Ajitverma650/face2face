@@ -27,7 +27,6 @@ mongoose.connect(process.env.MONGO_URI)
   .catch(err => console.error('MongoDB Connection Error:', err));
 
 app.use('/api/users', require('./routes/userRoutes'));
-app.use('/api/calls', require('./routes/callRoutes'));
 
 const server = http.createServer(app);
 
