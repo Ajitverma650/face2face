@@ -42,6 +42,12 @@ const io = new Server(server, {
 
 socketHandler(io);
 
+// Global error handler middleware (Bug #13 fix)
+app.use((err, req, res, next) => {
+  console.error('Unhandled Error:', err.stack);
+  res.status(err.status || 500).json({ msg: 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {

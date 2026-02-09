@@ -2,7 +2,7 @@
 import { User } from 'lucide-react';
 
 const VideoGrid = ({ remoteVideoRef, isJoined }) => (
-  <div className="lg:col-span-8">
+  <div className="lg:col-span-6">
     <div className="relative aspect-video bg-[#1e293b] rounded-4xl overflow-hidden border border-slate-800 shadow-2xl ring-1 ring-white/5">
       <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
       

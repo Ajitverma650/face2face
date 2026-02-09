@@ -3,8 +3,12 @@ import React from 'react';
 import { Video, ShieldCheck, LogOut } from 'lucide-react';
 import { useAuth } from '../store/AuthContext';
 
-const Navbar = () => {
+const Navbar = ({ onLogout }) => {
   const { logout, user } = useAuth();
+
+  const handleLogout = () => {
+    logout(onLogout); // Bug #17 fix: disconnect socket, then clear auth state
+  };
 
   return (
     <nav className="border-b border-slate-800 bg-[#0f172a]/80 backdrop-blur-xl sticky top-0 z-50">
@@ -28,7 +32,7 @@ const Navbar = () => {
             </span>
           )}
           <button
-            onClick={logout}
+            onClick={handleLogout}
             className="flex items-center gap-2 bg-slate-800/40 px-4 py-1.5 rounded-full border border-slate-700/50 hover:bg-slate-700/40 transition-colors"
           >
             <LogOut size={16} className="text-slate-400" />

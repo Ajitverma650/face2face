@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-// Create a single socket connection to the backend
-// This socket is used ONLY for signaling (no media data)
+// Bug #9 fix: Create socket with autoConnect: false — connect only after auth
 const socket = io(
-  import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
+  import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
+  { autoConnect: false }
 );
 
 export const useWebRTC = (currentUserId) => {
@@ -13,42 +13,36 @@ export const useWebRTC = (currentUserId) => {
      REFS (persistent across renders, do not trigger re-render)
      ========================================================= */
 
-  // Local camera video element
   const localVideoRef = useRef(null);
-
-  // Remote peer video element
   const remoteVideoRef = useRef(null);
-
-  // RTCPeerConnection instance (WebRTC core)
   const peerConnection = useRef(null);
-
-  // MediaStream from getUserMedia
   const localStream = useRef(null);
+
+  // Bug #5 fix: Use ref for activeRoomId to avoid stale closures in socket listeners
+  const activeRoomIdRef = useRef(null);
+
+  // Bug #3 fix: Track caller vs receiver role
+  const roleRef = useRef(null); // 'caller' | 'receiver'
 
   /* =========================================================
      STATE (controls UI + call flow)
      ========================================================= */
 
   const [isJoined, setIsJoined] = useState(false);
-  // true when both peers have accepted and joined the call
-
   const [isCalling, setIsCalling] = useState(false);
-  // true when current user initiated a call and is waiting
-
   const [isRinging, setIsRinging] = useState(false);
-  // true when an incoming call is ringing
-
   const [incomingCall, setIncomingCall] = useState(null);
-  // stores caller socketId (used only for UI)
-
   const [activeRoomId, setActiveRoomId] = useState(null);
-  // unique room for signaling between two peers
+  const [mediaError, setMediaError] = useState(null); // Bug #14 fix
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeRoomIdRef.current = activeRoomId;
+  }, [activeRoomId]);
 
   /* =========================================================
      ICE SERVERS
-     =========================================================
-     Used by WebRTC to discover network paths (NAT traversal)
-  */
+     ========================================================= */
   const servers = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -57,92 +51,126 @@ export const useWebRTC = (currentUserId) => {
   };
 
   /* =========================================================
+     CLEANUP (reset everything)
+     ========================================================= */
+  const cleanup = useCallback(() => {
+    setIsJoined(false);
+    setIsCalling(false);
+    setIsRinging(false);
+    setIncomingCall(null);
+    setActiveRoomId(null);
+    setMediaError(null);
+    roleRef.current = null;
+
+    if (localStream.current) {
+      localStream.current.getTracks().forEach(t => t.stop());
+      localStream.current = null;
+    }
+
+    if (peerConnection.current) {
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+  }, []);
+
+  /* =========================================================
      SOCKET EVENT LISTENERS
-     =========================================================
-     Handles all incoming signaling events from server
-  */
+     ========================================================= */
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Identify this socket with the logged-in user
+    // Bug #9 fix: Connect socket only when user is authenticated
+    if (!socket.connected) {
+      socket.connect();
+    }
+
     socket.emit('identify', currentUserId);
 
     /* ---------- Incoming call ---------- */
     socket.on('incoming-call', ({ from, roomId }) => {
-      setIncomingCall(from);   // caller socketId (UI only)
-      setActiveRoomId(roomId); // room to join if accepted
-      setIsRinging(true);      // show incoming call UI
+      setIncomingCall(from);
+      setActiveRoomId(roomId);
+      setIsRinging(true);
     });
 
     /* ---------- Call accepted ---------- */
     socket.on('call-accepted', () => {
-      setIsCalling(false); // stop "calling" state
-      setIsJoined(true);   // trigger WebRTC initialization
+      setIsCalling(false);
+      setIsJoined(true);
     });
 
-    /* ---------- Call rejected / ended ---------- */
+    /* ---------- Call rejected / ended / errors ---------- */
     socket.on('call-rejected', () => cleanup());
     socket.on('call-ended', () => cleanup());
+    socket.on('call-error', ({ message }) => {
+      console.error('Call Error:', message);
+      cleanup();
+    });
 
     /* ---------- WebRTC OFFER ---------- */
     socket.on('offer', async ({ sdp }) => {
-      // Offer received by call receiver
-      if (!peerConnection.current) return;
+      try {
+        if (!peerConnection.current) return;
 
-      // Set caller's offer as remote description
-      await peerConnection.current.setRemoteDescription(
-        new RTCSessionDescription(sdp)
-      );
+        await peerConnection.current.setRemoteDescription(
+          new RTCSessionDescription(sdp)
+        );
 
-      // Create answer
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
 
-      // Send answer back to caller
-      socket.emit('answer', { 
-        roomId: activeRoomId, 
-        sdp: answer 
-      });
+        // Bug #5 fix: Use ref instead of stale closure
+        socket.emit('answer', { 
+          roomId: activeRoomIdRef.current, 
+          sdp: answer 
+        });
+      } catch (err) {
+        console.error('Offer handling error:', err);
+      }
     });
 
     /* ---------- WebRTC ANSWER ---------- */
     socket.on('answer', async ({ sdp }) => {
-      // Answer received by caller
-      if (peerConnection.current?.signalingState !== 'stable') {
-        await peerConnection.current.setRemoteDescription(
-          new RTCSessionDescription(sdp)
-        );
+      try {
+        // Bug #11 fix: Only accept answer in 'have-local-offer' state
+        if (peerConnection.current?.signalingState === 'have-local-offer') {
+          await peerConnection.current.setRemoteDescription(
+            new RTCSessionDescription(sdp)
+          );
+        }
+      } catch (err) {
+        console.error('Answer handling error:', err);
       }
     });
 
     /* ---------- ICE CANDIDATES ---------- */
     socket.on('ice-candidate', async ({ candidate }) => {
-      if (candidate && peerConnection.current) {
-        await peerConnection.current.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
+      try {
+        if (candidate && peerConnection.current) {
+          await peerConnection.current.addIceCandidate(
+            new RTCIceCandidate(candidate)
+          );
+        }
+      } catch (err) {
+        console.error('ICE candidate error:', err);
       }
     });
 
-    // Cleanup listeners on unmount or dependency change
     return () => {
       socket.off('incoming-call');
       socket.off('call-accepted');
       socket.off('call-rejected');
       socket.off('call-ended');
+      socket.off('call-error');
       socket.off('offer');
       socket.off('answer');
       socket.off('ice-candidate');
     };
-  }, [currentUserId, activeRoomId]);
+  }, [currentUserId, cleanup]);
 
   /* =========================================================
      INITIALIZE WEBRTC
-     =========================================================
-     Runs when:
-     - user is calling
-     - OR user has joined a call
-  */
+     ========================================================= */
   useEffect(() => {
     if (!isJoined && !isCalling) return;
 
@@ -156,8 +184,8 @@ export const useWebRTC = (currentUserId) => {
           });
 
           localStream.current = stream;
+          setMediaError(null);
 
-          // Attach local stream to video element
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = stream;
           }
@@ -167,108 +195,85 @@ export const useWebRTC = (currentUserId) => {
         if (!peerConnection.current) {
           peerConnection.current = new RTCPeerConnection(servers);
 
-          // Send local tracks to peer
           localStream.current.getTracks().forEach(track =>
-            peerConnection.current.addTrack(
-              track, 
-              localStream.current
-            )
+            peerConnection.current.addTrack(track, localStream.current)
           );
 
-          // Receive remote tracks
           peerConnection.current.ontrack = (e) => {
             if (remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = e.streams[0];
             }
           };
 
-          // Send ICE candidates to other peer
           peerConnection.current.onicecandidate = (e) => {
             if (e.candidate) {
               socket.emit('ice-candidate', {
-                roomId: activeRoomId,
+                roomId: activeRoomIdRef.current, // Bug #5 fix: use ref
                 candidate: e.candidate,
               });
             }
           };
         }
 
-        /* ---------- Caller creates OFFER ---------- */
-        if (isJoined && !isCalling) {
+        /* ---------- Bug #3 fix: Only receiver creates the OFFER ---------- */
+        if (isJoined && roleRef.current === 'receiver') {
           const offer = await peerConnection.current.createOffer();
           await peerConnection.current.setLocalDescription(offer);
 
           socket.emit('offer', { 
-            roomId: activeRoomId, 
+            roomId: activeRoomIdRef.current,
             sdp: offer 
           });
         }
       } catch (err) {
         console.error('Media Error:', err);
+        // Bug #14 fix: Surface media errors to UI
+        if (err.name === 'NotAllowedError') {
+          setMediaError('Camera/microphone permission denied. Please allow access and try again.');
+        } else if (err.name === 'NotFoundError') {
+          setMediaError('No camera or microphone found on this device.');
+        } else {
+          setMediaError('Failed to access media devices: ' + err.message);
+        }
       }
     };
 
     init();
-  }, [isJoined, isCalling, activeRoomId]);
+  }, [isJoined, isCalling]);
 
   /* =========================================================
      ACTIONS (exposed to UI)
      ========================================================= */
 
-  // Start a private call
   const startPrivateCall = (targetUserId) => {
     const roomId = `room-${currentUserId}-${targetUserId}-${Date.now()}`;
 
     setActiveRoomId(roomId);
     setIsCalling(true);
+    roleRef.current = 'caller'; // Bug #3 fix
 
     socket.emit('join-room', roomId);
     socket.emit('call-user', { roomId, targetUserId });
   };
 
-  // Accept incoming call
   const acceptCall = () => {
     setIsRinging(false);
+    roleRef.current = 'receiver'; // Bug #3 fix
 
-    socket.emit('join-room', activeRoomId);
-    socket.emit('accept-call', { roomId: activeRoomId });
+    socket.emit('join-room', activeRoomIdRef.current);
+    socket.emit('accept-call', { roomId: activeRoomIdRef.current });
 
     setIsJoined(true);
   };
 
-  // Reject incoming call
   const rejectCall = () => {
-    socket.emit('reject-call', { roomId: activeRoomId });
+    socket.emit('reject-call', { roomId: activeRoomIdRef.current });
     cleanup();
   };
 
-  // End active call
   const endCall = () => {
-    socket.emit('end-call', { roomId: activeRoomId });
+    socket.emit('end-call', { roomId: activeRoomIdRef.current });
     cleanup();
-  };
-
-  /* =========================================================
-     CLEANUP (reset everything)
-     ========================================================= */
-  const cleanup = () => {
-    setIsJoined(false);
-    setIsCalling(false);
-    setIsRinging(false);
-    setIncomingCall(null);
-    setActiveRoomId(null);
-
-    // Stop camera & mic
-    if (localStream.current) {
-      localStream.current.getTracks().forEach(t => t.stop());
-      localStream.current = null;
-    }
-
-    // Close peer connection
-    if (peerConnection.current) {
-      peerConnection.current.close();
-      peerConnection.current = null;
-    }
   };
 
   /* =========================================================
@@ -281,9 +286,11 @@ export const useWebRTC = (currentUserId) => {
     isCalling,
     isRinging,
     incomingCall,
+    mediaError,
     startPrivateCall,
     acceptCall,
     rejectCall,
     endCall,
+    socket, // expose for logout disconnect
   };
 };

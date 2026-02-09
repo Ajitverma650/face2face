@@ -20,11 +20,24 @@ exports.startCall = async (req, res) => {
 exports.updateCallStatus = async (req, res) => {
   try {
     const { callId, status } = req.body;
-    const call = await Call.findByIdAndUpdate(
-      callId,
+
+    if (!callId || !status) {
+      return res.status(400).json({ msg: 'callId and status are required' });
+    }
+
+    if (!['missed', 'rejected', 'completed'].includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status value' });
+    }
+
+    // Only allow caller or receiver to update their own call
+    const call = await Call.findOneAndUpdate(
+      { _id: callId, $or: [{ caller: req.user.id }, { receiver: req.user.id }] },
       { status, endTime: Date.now() },
       { new: true }
     );
+
+    if (!call) return res.status(404).json({ msg: 'Call not found or unauthorized' });
+
     res.json(call);
   } catch (err) {
     res.status(500).send('Server Error');

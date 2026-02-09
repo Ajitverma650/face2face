@@ -22,10 +22,12 @@ const Dashboard = () => {
     isCalling,
     isRinging,
     incomingCall,
+    mediaError,
     startPrivateCall,
     acceptCall,
     endCall,
-    rejectCall
+    rejectCall,
+    socket
   } = webrtc;
 
   // Poll for online users
@@ -48,7 +50,7 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans antialiased">
-      <Navbar />
+      <Navbar onLogout={() => socket?.disconnect()} />
 
       <main className="max-w-7xl mx-auto px-6 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">

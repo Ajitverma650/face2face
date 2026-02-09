@@ -15,7 +15,6 @@ const Controls = ({ states, actions }) => {
   } = states;
 
   const { 
-    callUser, 
     endCall, 
     acceptCall, 
     rejectCall 
