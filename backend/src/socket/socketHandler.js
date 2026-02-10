@@ -104,6 +104,9 @@ const socketHandler = (io) => {
         // Clear receiver tracking (no longer needed once accepted)
         callReceivers.delete(roomId);
 
+        // Join room before emitting to ensure both parties are in the room
+        socket.join(roomId);
+
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'busy' });
         }
