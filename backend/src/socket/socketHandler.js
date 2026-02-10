@@ -1,48 +1,32 @@
-const User = require('../models/User'); 
+const User = require('../models/User');
 
-const CALL_TIMEOUT_MS = 30000; // 30 seconds
-const pendingCalls = new Map();  // roomId → timeoutId
-const callReceivers = new Map(); // roomId → receiver socketId
-
+const CALL_TIMEOUT = 30000;
+const pendingCalls = new Map(); // roomId → timeoutId
 
 const socketHandler = (io) => {
-
-  // Fired every time a new client connects via Socket.IO
   io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+    console.log('Connected:', socket.id);
 
-    /* =========================================================
-       1. IDENTIFY USER
-       - Link application user (MongoDB userId) with socket.id
-       - Mark user as online
-       - Fetch username for caller display
-    */
+    // Identify user
     socket.on('identify', async (userId) => {
       try {
-        const user = await User.findByIdAndUpdate(userId, { 
-          socketId: socket.id,
-          status: 'online'      
-        }, { new: true });
-
-        socket.userId = userId; 
-        socket.username = user?.username || 'Anonymous'; 
-
-        console.log(`User ${userId} (${socket.username}) is now online with socket ${socket.id}`);
+        const user = await User.findByIdAndUpdate(
+          userId,
+          { socketId: socket.id, status: 'online' },
+          { new: true }
+        );
+        socket.userId = userId;
+        socket.username = user?.username || 'Anonymous';
+        console.log(`${socket.username} online`);
       } catch (err) {
-        console.error('Identification Error:', err);
+        console.error('Identify error:', err);
       }
     });
 
-    /* =========================================================
-       2. JOIN ROOM (SIGNALING ONLY)
-    */
-    socket.on('join-room', (roomId) => {
-      socket.join(roomId);
-    });
+    // Join room
+    socket.on('join-room', (roomId) => socket.join(roomId));
 
-    /* =========================================================
-       3. CALL USER (PRIVATE CALL)
-    */
+    // Call user
     socket.on('call-user', async ({ roomId, targetUserId }) => {
       try {
         const target = await User.findById(targetUserId);
@@ -50,150 +34,92 @@ const socketHandler = (io) => {
         if (!target || target.status === 'offline') {
           return socket.emit('call-error', { message: 'User is offline' });
         }
-
         if (target.status === 'busy') {
-          return socket.emit('call-error', { message: 'User is in another call' });
+          return socket.emit('call-error', { message: 'User is busy' });
         }
 
-        //Mark caller as busy when initiating call
+        // Mark caller busy
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'busy' });
         }
 
-        // Track receiver for cleanup when caller cancels
-        callReceivers.set(roomId, target.socketId);
+        // Auto-join receiver to room (so room emits work for cancel/timeout)
+        const targetSocket = io.sockets.sockets.get(target.socketId);
+        if (targetSocket) targetSocket.join(roomId);
 
-        socket.to(target.socketId).emit('incoming-call', { 
+        // Notify receiver
+        io.to(target.socketId).emit('incoming-call', {
           from: socket.id,
           roomId,
-          callerName: socket.username || 'Anonymous'
+          callerName: socket.username,
         });
 
-        // Auto-timeout: if callee doesn't respond within 30s, revert both to online
+        // Timeout
         const timeoutId = setTimeout(async () => {
-          try {
-            pendingCalls.delete(roomId);
-            callReceivers.delete(roomId);
-            if (socket.userId) {
-              await User.findByIdAndUpdate(socket.userId, { status: 'online' });
-            }
-            socket.emit('call-error', { message: 'No answer — call timed out' });
-            socket.to(target.socketId).emit('call-ended', { from: socket.id });
-          } catch (err) {
-            console.error('Call Timeout Error:', err);
+          pendingCalls.delete(roomId);
+          if (socket.userId) {
+            await User.findByIdAndUpdate(socket.userId, { status: 'online' });
           }
-        }, CALL_TIMEOUT_MS);
+          socket.emit('call-error', { message: 'No answer' });
+          socket.to(roomId).emit('call-ended');
+        }, CALL_TIMEOUT);
         pendingCalls.set(roomId, timeoutId);
-
       } catch (err) {
-        console.error('Call User Error:', err);
+        console.error('Call error:', err);
       }
     });
 
-    /* =========================================================
-       4. ACCEPT CALL — 
-    */
+    // Accept call
     socket.on('accept-call', async ({ roomId }) => {
       try {
-        // Clear call timeout
         if (pendingCalls.has(roomId)) {
           clearTimeout(pendingCalls.get(roomId));
           pendingCalls.delete(roomId);
         }
-
-        // Clear receiver tracking (no longer needed once accepted)
-        callReceivers.delete(roomId);
-
-        // Join room before emitting to ensure both parties are in the room
-        socket.join(roomId);
 
         if (socket.userId) {
           await User.findByIdAndUpdate(socket.userId, { status: 'busy' });
         }
 
-        socket.to(roomId).emit('call-accepted', { from: socket.id });
+        socket.to(roomId).emit('call-accepted');
       } catch (err) {
-        console.error('Accept Call Error:', err);
+        console.error('Accept error:', err);
       }
     });
 
-    /* =========================================================
-       5. REJECT CALL — revert both users to online
-    */
+    // Reject call
     socket.on('reject-call', async ({ roomId }) => {
       try {
-        // Clear call timeout
         if (pendingCalls.has(roomId)) {
           clearTimeout(pendingCalls.get(roomId));
           pendingCalls.delete(roomId);
         }
 
-        // Clear receiver tracking
-        callReceivers.delete(roomId);
-
-        // Revert rejector's status to online
-        if (socket.userId) {
-          await User.findByIdAndUpdate(socket.userId, { status: 'online' });
-        }
-
-        // Revert all other users in the room to online
-        const socketsInRoom = await io.in(roomId).fetchSockets();
-        for (const s of socketsInRoom) {
-          if (s.userId && s.userId !== socket.userId) {
-            await User.findByIdAndUpdate(s.userId, { status: 'online' });
-          }
-        }
-
-        socket.to(roomId).emit('call-rejected', { from: socket.id });
+        await resetRoomUsers(io, roomId);
+        socket.to(roomId).emit('call-rejected');
         socket.leave(roomId);
       } catch (err) {
-        console.error('Reject Call Error:', err);
+        console.error('Reject error:', err);
       }
     });
 
-    /* =========================================================
-       6. END CALL — reset both users to online + leave room
-    */
+    // End call
     socket.on('end-call', async ({ roomId }) => {
       try {
-        // Clear call timeout (if still pending)
         if (pendingCalls.has(roomId)) {
           clearTimeout(pendingCalls.get(roomId));
           pendingCalls.delete(roomId);
         }
 
-        // Get receiver socket ID for direct notification
-        const receiverSocketId = callReceivers.get(roomId);
-        callReceivers.delete(roomId);
-
-        // Revert ender's status to online
-        if (socket.userId) {
-          await User.findByIdAndUpdate(socket.userId, { status: 'online' });
-        }
-
-        // Revert all other users in the room to online
-        const socketsInRoom = await io.in(roomId).fetchSockets();
-        for (const s of socketsInRoom) {
-          if (s.userId && s.userId !== socket.userId) {
-            await User.findByIdAndUpdate(s.userId, { status: 'online' });
-          }
-        }
-
-        // Notify receiver directly (if they haven't joined room yet)
-        if (receiverSocketId) {
-          io.to(receiverSocketId).emit('call-ended', { from: socket.id });
-        }
-        // Also emit to room (for active calls)
-        socket.to(roomId).emit('call-ended', { from: socket.id });
+        await resetRoomUsers(io, roomId);
+        socket.to(roomId).emit('call-ended');
         socket.leave(roomId);
       } catch (err) {
-        console.error('End Call Error:', err);
+        console.error('End call error:', err);
       }
     });
 
-    /* =========================================================
-       7. WEBRTC SIGNALING EVENTS
-    */
+    // WebRTC signaling
     socket.on('offer', ({ roomId, sdp }) => {
       socket.to(roomId).emit('offer', { sdp, from: socket.id });
     });
@@ -206,54 +132,37 @@ const socketHandler = (io) => {
       socket.to(roomId).emit('ice-candidate', { candidate, from: socket.id });
     });
 
-    /* =========================================================
-       8. DISCONNECT CLEANUP
-       - Notify any active call rooms so the other user isn't stuck
-       - Reset all participants in those rooms back to online
-    */
+    // Disconnect
     socket.on('disconnect', async () => {
       try {
-        // Clean up pending calls where this socket was the caller
-        for (const [roomId, receiverSocketId] of callReceivers.entries()) {
-          // Check if disconnected socket was part of this call setup
-          const callerRoom = Array.from(socket.rooms).find(r => r === roomId);
-          if (callerRoom) {
-            io.to(receiverSocketId).emit('call-ended', { from: socket.id });
-            callReceivers.delete(roomId);
-            if (pendingCalls.has(roomId)) {
-              clearTimeout(pendingCalls.get(roomId));
-              pendingCalls.delete(roomId);
-            }
-          }
-        }
-
-        // Notify all rooms this socket was in (skip its own socket.id room)
         for (const roomId of socket.rooms) {
           if (roomId === socket.id) continue;
-
-          // Reset other participants in the room to online
-          const socketsInRoom = await io.in(roomId).fetchSockets();
-          for (const s of socketsInRoom) {
-            if (s.userId && s.userId !== socket.userId) {
-              await User.findByIdAndUpdate(s.userId, { status: 'online' });
-            }
-          }
-
-          socket.to(roomId).emit('call-ended', { from: socket.id });
+          await resetRoomUsers(io, roomId);
+          socket.to(roomId).emit('call-ended');
         }
 
         if (socket.userId) {
-          await User.findByIdAndUpdate(socket.userId, { 
+          await User.findByIdAndUpdate(socket.userId, {
             status: 'offline',
-            socketId: null
+            socketId: null,
           });
         }
-        console.log('User disconnected:', socket.id);
+        console.log('Disconnected:', socket.id);
       } catch (err) {
-        console.error('Disconnect Cleanup Error:', err);
+        console.error('Disconnect error:', err);
       }
     });
   });
 };
+
+// Reset all users in room to online
+async function resetRoomUsers(io, roomId) {
+  const sockets = await io.in(roomId).fetchSockets();
+  for (const s of sockets) {
+    if (s.userId) {
+      await User.findByIdAndUpdate(s.userId, { status: 'online' });
+    }
+  }
+}
 
 module.exports = socketHandler;
