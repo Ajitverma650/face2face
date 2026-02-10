@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { toast } from 'react-toastify';
 
-//  Create socket with autoConnect: false — connect only after auth
+//connect only after auth
 const socket = io(
   import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
   { autoConnect: false }
@@ -34,7 +34,9 @@ export const useWebRTC = (currentUserId) => {
   const [isRinging, setIsRinging] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeRoomId, setActiveRoomId] = useState(null);
-  const [mediaError, setMediaError] = useState(null); // 
+  const [mediaError, setMediaError] = useState(null);
+  const [isAudioMuted, setIsAudioMuted] = useState(false);
+  const [isVideoMuted, setIsVideoMuted] = useState(false); 
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -61,6 +63,8 @@ export const useWebRTC = (currentUserId) => {
     setIncomingCall(null);
     setActiveRoomId(null);
     setMediaError(null);
+    setIsAudioMuted(false);
+    setIsVideoMuted(false);
     roleRef.current = null;
 
     if (localStream.current) {
@@ -295,6 +299,28 @@ export const useWebRTC = (currentUserId) => {
     cleanup();
   };
 
+  // Toggle audio (mute/unmute microphone)
+  const toggleAudio = useCallback(() => {
+    if (localStream.current) {
+      const audioTrack = localStream.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsAudioMuted(!audioTrack.enabled);
+      }
+    }
+  }, []);
+
+  // Toggle video (turn camera on/off)
+  const toggleVideo = useCallback(() => {
+    if (localStream.current) {
+      const videoTrack = localStream.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoMuted(!videoTrack.enabled);
+      }
+    }
+  }, []);
+
   /* =========================================================
      EXPOSE API TO COMPONENTS
      ========================================================= */
@@ -306,10 +332,14 @@ export const useWebRTC = (currentUserId) => {
     isRinging,
     incomingCall,
     mediaError,
+    isAudioMuted,
+    isVideoMuted,
     startPrivateCall,
     acceptCall,
     rejectCall,
     endCall,
-    socket, // expose for logout disconnect
+    toggleAudio,
+    toggleVideo,
+    socket,
   };
 };

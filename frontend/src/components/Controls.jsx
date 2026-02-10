@@ -1,9 +1,12 @@
 
 import React from 'react';
 import { 
-  Phone, 
   PhoneOff, 
-  PhoneIncoming 
+  PhoneIncoming,
+  Mic,
+  MicOff,
+  Video,
+  VideoOff
 } from 'lucide-react';
 
 const Controls = ({ states, actions }) => {
@@ -11,13 +14,17 @@ const Controls = ({ states, actions }) => {
     isJoined, 
     isCalling, 
     isRinging, 
-    incomingCall 
+    incomingCall,
+    isAudioMuted,
+    isVideoMuted
   } = states;
 
   const { 
     endCall, 
     acceptCall, 
-    rejectCall 
+    rejectCall,
+    toggleAudio,
+    toggleVideo
   } = actions;
 
   return (
@@ -29,8 +36,6 @@ const Controls = ({ states, actions }) => {
       </div>
 
       <div className="space-y-4">
-       
-
         {isCalling && (
           <button
             onClick={endCall}
@@ -59,12 +64,42 @@ const Controls = ({ states, actions }) => {
         )}
 
         {isJoined && (
-          <button
-            onClick={endCall}
-            className="w-full py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg shadow-rose-600/20 active:scale-[0.98]"
-          >
-            <PhoneOff size={20} /> Terminate Call
-          </button>
+          <>
+            {/* Mute Controls */}
+            <div className="grid grid-cols-2 gap-4">
+              <button
+                onClick={toggleAudio}
+                className={`py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${
+                  isAudioMuted
+                    ? 'bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/30'
+                    : 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                {isAudioMuted ? 'Unmute' : 'Mute'}
+              </button>
+
+              <button
+                onClick={toggleVideo}
+                className={`py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${
+                  isVideoMuted
+                    ? 'bg-rose-600/20 text-rose-400 border border-rose-600/30 hover:bg-rose-600/30'
+                    : 'bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700'
+                }`}
+              >
+                {isVideoMuted ? <VideoOff size={18} /> : <Video size={18} />}
+                {isVideoMuted ? 'Show' : 'Hide'}
+              </button>
+            </div>
+
+            {/* End Call */}
+            <button
+              onClick={endCall}
+              className="w-full py-4 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg shadow-rose-600/20 active:scale-[0.98]"
+            >
+              <PhoneOff size={20} /> End Call
+            </button>
+          </>
         )}
       </div>
     </div>

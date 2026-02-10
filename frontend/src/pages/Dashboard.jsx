@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '../store/AuthContext';
 import { useWebRTC } from '../hooks/useWebRTC';
@@ -6,13 +6,15 @@ import Navbar from '../components/Navbar';
 import VideoGrid from '../components/VideoGrid';
 import Controls from '../components/Controls';
 import UserList from '../components/UserList';
-import { Monitor } from 'lucide-react';
+import { Monitor, Clock } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 const Dashboard = () => {
   const { user } = useAuth();
   const [onlineUsers, setOnlineUsers] = useState([]);
+  const [callDuration, setCallDuration] = useState(0);
+  const timerRef = useRef(null);
   
   // Initialize WebRTC hook with the logged-in user's ID
   const webrtc = useWebRTC(user?.id);
@@ -25,10 +27,14 @@ const Dashboard = () => {
     isRinging,
     incomingCall,
     mediaError,
+    isAudioMuted,
+    isVideoMuted,
     startPrivateCall,
     acceptCall,
     endCall,
     rejectCall,
+    toggleAudio,
+    toggleVideo,
     socket
   } = webrtc;
 
@@ -57,6 +63,35 @@ const Dashboard = () => {
       toast.error(mediaError);
     }
   }, [mediaError]);
+
+  // Call timer
+  useEffect(() => {
+    if (isJoined) {
+      setCallDuration(0);
+      timerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setCallDuration(0);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isJoined]);
+
+  // Format seconds to MM:SS
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans antialiased">
@@ -102,6 +137,14 @@ const Dashboard = () => {
                   {isRinging && "Incoming secure connection..."}
                   {isJoined && !isCalling && !isRinging && "Secure Session Active"}
                 </span>
+                {isJoined && !isCalling && !isRinging && (
+                  <div className="flex items-center gap-2 ml-4 px-3 py-1 bg-zinc-800/50 rounded-full">
+                    <Clock size={12} className="text-emerald-400" />
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      {formatTime(callDuration)}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -125,8 +168,8 @@ const Dashboard = () => {
             </div>
 
             <Controls
-              states={{ isJoined, isCalling, isRinging, incomingCall }}
-              actions={{ endCall, acceptCall, rejectCall }}
+              states={{ isJoined, isCalling, isRinging, incomingCall, isAudioMuted, isVideoMuted }}
+              actions={{ endCall, acceptCall, rejectCall, toggleAudio, toggleVideo }}
             />
           </div>
         </div>
